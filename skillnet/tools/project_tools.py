@@ -81,6 +81,8 @@ def run_checker(ctx: ToolContext, project: Path, scripts: list[str], scenes: lis
     for lst in (errs, warns):
         for d in lst:
             d.pop("level", None)
+    for d in errs:
+        d["message"] = C.godot4_hint(d["message"])
     if raw is None:
         errs.append({"message": "the checker stopped before finishing (exit %s)" % res.returncode})
     return errs, warns, raw
@@ -124,6 +126,7 @@ def create_game_project(args: CreateIn, ctx: ToolContext) -> ToolResult[CreateOu
     project = C.state_project(ctx)
     if project.exists():
         shutil.rmtree(project)
+    (project.parent / "check_history.json").unlink(missing_ok=True)
     project.mkdir(parents=True)
     ctx.progress(10, "writing starter files")
     for rel, text in build_starter(args.starter, name, args.window_width, args.window_height).items():
@@ -161,10 +164,18 @@ class FileSpec(ToolInput):
     content: str = Field(description="The full text of the file (GDScript for .gd, Godot text scene format for .tscn).", max_length=1_000_000)
 
 
+class EditSpec(ToolInput):
+    path: str = Field(description="res:// path of an existing text file to change, e.g. res://scripts/main.gd.")
+    find: str = Field(min_length=1, max_length=20_000, description="Exact text to find (copy it from inspect_project read_files or a check_project error), e.g. 'onready var guard'.")
+    replace: str = Field(max_length=200_000, description="Text to put in its place (may be empty to delete it).")
+    all: bool = Field(default=False, description="Replace every occurrence; by default the text must occur exactly once.")
+
+
 class WriteIn(ToolInput):
     project: Optional[ProjectZip] = Field(default=None, description="An existing Godot 4 project as a zip, to open it when there is no state_id yet (replaces the state's project).")
     files: list[FileSpec] = Field(default_factory=list, max_length=50, description="Files to write or replace (up to 50). Text files only: .gd, .tscn, .tres, .gdshader, .cfg, .json, .txt, .md, .csv, project.godot.")
     delete: list[str] = Field(default_factory=list, max_length=100, description="res:// paths of files to delete.")
+    edits: list[EditSpec] = Field(default_factory=list, max_length=50, description="Small changes to existing files without rewriting them: [{path, find, replace}] exact-text replacements, applied in order. Use these to fix a line in the user's script and keep the rest of their code as it is.")
 
 
 class WriteOut(ToolOutput):
@@ -179,12 +190,12 @@ class WriteOut(ToolOutput):
 @tool(kind="edit", title="Write or replace game scripts and scenes", timeout_s=240, state_version=STATE_V,
       examples=[{"arguments": {"files": [{"path": "res://scripts/enemy.gd", "content": "extends Area2D\n"}]}}])
 def write_game_files(args: WriteIn, ctx: ToolContext) -> ToolResult[WriteOut]:
-    """Use to add game logic or fix code that check_project flagged: writes GDScript (.gd), scenes (.tscn), resources (.tres), shaders or text files at res:// paths, can delete files, and compiles every written .gd with Godot 4.4 right away, returning syntax errors with line numbers. Also opens an uploaded project zip when there is no state_id yet. Returns the updated project zip and state_id; files are written even when they have errors, so fix and call again."""
+    """Use to add game logic or fix code that check_project flagged: writes GDScript (.gd), scenes (.tscn), resources (.tres), shaders or text files at res:// paths, changes lines in existing files with exact find/replace `edits` (keeps the rest of the user's code), can delete files, and compiles every written .gd with Godot 4.4 right away, returning syntax errors with line numbers. Also opens an uploaded project zip when there is no state_id yet. Returns the updated project zip and state_id; files are written even when they have errors, so fix and call again."""
     project = C.load_project(ctx, args.project)
     assert project is not None
-    if not args.files and not args.delete and args.project is None:
-        raise ToolError("nothing_to_do", "No files to write or delete were given.",
-                        "Pass `files` as a list of {path: 'res://...', content: '...'} or `delete` as res:// paths.")
+    if not args.files and not args.delete and not args.edits and args.project is None:
+        raise ToolError("nothing_to_do", "No files to write, edit or delete were given.",
+                        "Pass `files` as a list of {path: 'res://...', content: '...'}, `edits` as [{path, find, replace}] or `delete` as res:// paths.")
     written, deleted = [], []
     plan: list[tuple[str, Path, str]] = []
     for f in args.files:
@@ -197,6 +208,36 @@ def write_game_files(args: WriteIn, ctx: ToolContext) -> ToolResult[WriteOut]:
             raise ToolError("bad_project_file", "The new project.godot lacks config_version=5 (Godot 4).",
                             "Keep 'config_version=5' at the top of project.godot, or change settings with edit_scenes set_setting instead.")
         plan.append((f.path, project / rel, f.content))
+    # Exact-text edits are checked in full before anything is written, so a bad edit changes nothing.
+    pending = {p: c for _r, p, c in plan}
+    for i, e in enumerate(args.edits):
+        rel = C.res_to_rel(e.path)
+        target = project / rel
+        if target in pending:
+            text = pending[target]
+        elif target.is_file():
+            text = target.read_text(errors="replace")
+        else:
+            raise ToolError("edit_file_missing", f"Edit {i}: {e.path} does not exist in the project, so nothing was changed.",
+                            "Check the path with inspect_project, or create the file with `files` instead of `edits`.")
+        n = text.count(e.find)
+        if n == 0:
+            near = _closest_line(text, e.find)
+            raise ToolError("edit_text_not_found", f"Edit {i}: the text to find does not occur in {e.path}, so nothing was changed."
+                            + (f" Closest line: {near!r}" if near else ""),
+                            f"Call inspect_project with read_files=['{e.path}'] to see the exact text (tabs, spaces), then send the edits again.")
+        if n > 1 and not e.all:
+            raise ToolError("edit_text_ambiguous", f"Edit {i}: the text to find occurs {n} times in {e.path}, so nothing was changed.",
+                            "Include more of the surrounding line so it occurs once, or set all=true to replace every occurrence.")
+        text = text.replace(e.find, e.replace) if e.all else text.replace(e.find, e.replace, 1)
+        if rel == "project.godot" and not re.search(r"^config_version\s*=\s*5", text, re.M):
+            raise ToolError("bad_project_file", "The edit would remove config_version=5 from project.godot; nothing was changed.",
+                            "Keep 'config_version=5' in project.godot.")
+        if target in pending:
+            plan = [(r, p, text if p == target else c) for r, p, c in plan]
+        else:
+            plan.append((e.path, target, text))
+        pending[target] = text
     for d in args.delete:
         rel = C.res_to_rel(d)
         if rel == "project.godot":
@@ -241,10 +282,18 @@ def write_game_files(args: WriteIn, ctx: ToolContext) -> ToolResult[WriteOut]:
         n = len(script_errors) + len(scene_problems)
         return ToolResult(data=out, outputs=outputs,
                           summary=f"Wrote {len(written)} file(s); {n} problem(s) found",
-                          next_step="Fix each script_errors entry (file and line) and write the corrected file again with write_game_files. Godot 3 syntax (onready, yield, KinematicBody2D, export var) must be converted to Godot 4.")
+                          next_step="Fix each script_errors entry (file and line) with write_game_files `edits` (find/replace; read the file with inspect_project read_files) or a corrected whole file. Godot 3 syntax (onready, yield, KinematicBody2D, export var) must be converted to Godot 4.")
     return ToolResult(data=out, outputs=outputs,
                       summary=f"Wrote {len(written)} and deleted {len(deleted)} file(s); all written scripts compile",
                       next_step="Run check_project, then run_game or playtest_game.")
+
+
+def _closest_line(text: str, find: str) -> str | None:
+    import difflib
+    first = find.strip().splitlines()[0] if find.strip() else ""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    m = difflib.get_close_matches(first, lines, n=1, cutoff=0.6) if first else []
+    return m[0][:200] if m else None
 
 
 # =============================================================================== edit scenes
@@ -326,6 +375,88 @@ def _norm_op(i: int, op: SceneOp) -> dict:
     return d
 
 
+_NODE_HDR = re.compile(r'^\[node\s+(.*)\]\s*$')
+_PROP = re.compile(r'^([A-Za-z_][\w/:.]*)\s*=\s*(.*)$')
+
+
+def _node_path(hdr: str) -> str | None:
+    name = re.search(r'\bname="((?:[^"\\]|\\.)*)"', hdr)
+    if not name:
+        return None
+    parent = re.search(r'\bparent="((?:[^"\\]|\\.)*)"', hdr)
+    if parent is None:
+        return "."
+    return name.group(1) if parent.group(1) == "." else f"{parent.group(1)}/{name.group(1)}"
+
+
+def _balanced(v: str) -> bool:
+    return all(v.count(a) == v.count(b) for a, b in ("()", "[]", "{}")) and v.count('"') % 2 == 0
+
+
+def _node_sections(text: str) -> dict[str, tuple[int, int, dict[str, str]]]:
+    """Map node path -> (header line index, index after its last property line, {property: one-line value text})."""
+    lines = text.split("\n")
+    out: dict[str, tuple[int, int, dict[str, str]]] = {}
+    i = 0
+    while i < len(lines):
+        m = _NODE_HDR.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        path, start, props, j, end = _node_path(m.group(1)), i, {}, i + 1, i + 1
+        while j < len(lines) and not lines[j].startswith("["):
+            pm = _PROP.match(lines[j])
+            if pm:
+                if _balanced(pm.group(2)):
+                    props[pm.group(1)] = lines[j]
+                end = j + 1
+            j += 1
+        if path:
+            out[path] = (start, end, props)
+        i = j
+    return out
+
+
+def _restore_lost_values(before: str, after: str, ops: list[dict], scene: str) -> tuple[str, list[str], list[str]]:
+    """Godot drops property values it can't apply when re-saving a scene (e.g. exported variables of a node whose
+    script doesn't compile). Put back every value of an untouched node that disappeared; return (text, kept, lost)."""
+    touched_nodes: set[str] = set()
+    touched_props: set[tuple[str, str]] = set()
+    for op in ops:
+        if op.get("scene") != scene:
+            continue
+        node = str(op.get("node") or "").removeprefix("./") or "."
+        if op["op"] in ("remove_node", "rename_node", "reparent_node", "attach_script"):
+            touched_nodes.add(node)
+        for k in (op.get("properties") or {}):
+            touched_props.add((node, k))
+        if op["op"] == "set_collision_layers":
+            touched_props.update({(node, "collision_layer"), (node, "collision_mask")})
+    old, new = _node_sections(before), _node_sections(after)
+    lines = after.split("\n")
+    kept, lost, inserts = [], [], []
+    for path, (_s, _e, props) in old.items():
+        if path not in new or any(path == t or path.startswith(t + "/") for t in touched_nodes if t != "."):
+            continue
+        if "." in touched_nodes and path == ".":
+            continue
+        _ns, nend, nprops = new[path]
+        missing = [k for k in props if k not in nprops and (path, k) not in touched_props and k not in ("script",)]
+        add = []
+        for k in missing:
+            line = props[k]
+            if "ExtResource(" in line or "SubResource(" in line:
+                lost.append(f"{scene} {path}: {line.strip()}")
+            else:
+                add.append(line)
+                kept.append(f"{path}.{line.strip()}")
+        if add:
+            inserts.append((nend, add))
+    for at, add in sorted(inserts, reverse=True):
+        lines[at:at] = add
+    return "\n".join(lines), kept, lost
+
+
 @tool(kind="edit", title="Edit scenes and project settings", timeout_s=240, state_version=STATE_V,
       examples=[{"arguments": {"operations": [{"op": "add_node", "scene": "res://scenes/main.tscn", "parent": ".", "type": "Timer", "name": "SpawnTimer", "properties": {"wait_time": 2, "autostart": True}}]}}])
 def edit_scenes(args: EditIn, ctx: ToolContext) -> ToolResult[EditOut]:
@@ -347,7 +478,18 @@ def edit_scenes(args: EditIn, ctx: ToolContext) -> ToolResult[EditOut]:
                             "Run check_project to find broken scripts or scenes, fix them with write_game_files, then retry.")
         results = [OpResult(**r) for r in raw["results"]]
         failed = raw["failed_op"] if raw["failed_op"] >= 0 else None
+        kept_values: list[str] = []
+        lost_values: list[str] = []
         if failed is None:
+            for sc in raw["scenes_changed"]:
+                rel = C.res_to_rel(sc)
+                src, dst = project / rel, work / rel
+                if sc.endswith(".tscn") and src.is_file() and dst.is_file():
+                    text, kept, lost = _restore_lost_values(src.read_text(errors="replace"), dst.read_text(errors="replace"), ops, sc)
+                    if kept:
+                        dst.write_text(text)
+                    kept_values += [f"{sc} {k}" for k in kept]
+                    lost_values += lost
             # Commit: copy the edited files back (not the import cache).
             for p in sorted(work.rglob("*")):
                 rel = p.relative_to(work)
@@ -368,8 +510,18 @@ def edit_scenes(args: EditIn, ctx: ToolContext) -> ToolResult[EditOut]:
                           summary=f"Operation {failed} ({results[failed].op}) failed: {msg[:160]}; nothing was saved",
                           uncertain=[f"Operations before {failed} succeeded in a trial run but were not saved."],
                           next_step=f"Fix operation {failed} using its message, then send the whole batch again.")
-    return ToolResult(data=out, outputs=outputs, summary=f"Applied {len(results)} operation(s); changed {len(out.scenes_changed)} file(s)",
-                      next_step="Run check_project, then run_game to see the result.")
+    uncertain = []
+    if kept_values:
+        uncertain.append("Godot could not apply these saved values while editing (usually because the node's script doesn't "
+                         "compile yet), so they were copied back unchanged: " + "; ".join(kept_values[:12]))
+    if lost_values:
+        uncertain.append("These resource values were dropped by Godot when it re-saved the scene: " + "; ".join(lost_values[:8]))
+    return ToolResult(data=out, outputs=outputs, uncertain=uncertain,
+                      summary=f"Applied {len(results)} operation(s); changed {len(out.scenes_changed)} file(s)"
+                              + (f"; kept {len(kept_values)} value(s) Godot couldn't load" if kept_values else ""),
+                      next_step=("Fix the scripts of the nodes listed in uncertain so their kept values load (check_project lists them). "
+                                 if kept_values else "") + ("Set the dropped values again with edit_scenes set_properties. " if lost_values else "")
+                                + "Run check_project, then run_game to see the result.")
 
 
 # =============================================================================== inspect
@@ -377,6 +529,14 @@ def edit_scenes(args: EditIn, ctx: ToolContext) -> ToolResult[EditOut]:
 class InspectIn(ToolInput):
     project: Optional[ProjectZip] = Field(default=None, description="The user's Godot 4 project as a zip (opens it and returns a state_id). Omit when passing a state_id.")
     detail: Literal["summary", "full"] = Field(default="summary", description="summary: counts, scripts and actions; full: also every scene's node tree (written to project_map.json either way).")
+    read_files: list[str] = Field(default_factory=list, max_length=10, description="res:// paths of text files (scripts, scenes, project.godot) whose full text to return, up to 10, e.g. ['res://scripts/main.gd']. Read a script before fixing it so the user's logic is kept.")
+
+
+class FileText(ToolOutput):
+    path: str
+    text: str
+    lines: int
+    truncated: bool = False
 
 
 class SceneInfo(ToolOutput):
@@ -405,12 +565,13 @@ class InspectOut(ToolOutput):
     input_actions: dict[str, list[str]]
     autoloads: dict[str, str]
     file_count: int
+    file_contents: list[FileText] = Field(default_factory=list)
 
 
 @tool(kind="inspect", title="Summarise a Godot project", timeout_s=90, state_version=STATE_V,
       examples=[{"arguments": {"detail": "summary"}}])
 def inspect_project(args: InspectIn, ctx: ToolContext) -> ToolResult[InspectOut]:
-    """Use first on a Godot project the user uploads, or before play-testing, to learn its structure: Godot config version and renderer, main scene, scene trees (node names, types, scripts), each script's methods, signals and exported variables, input actions with their keys, and autoloads. Accepts a project zip (opens it and returns a state_id) or a state_id. Reads the files directly, so it also works on projects that don't compile."""
+    """Use first on a Godot project the user uploads, or before play-testing, to learn its structure: Godot config version and renderer, main scene, scene trees (node names, types, scripts), each script's methods, signals and exported variables, input actions with their keys, and autoloads. `read_files` returns the full text of chosen scripts or scenes, so you can fix them without losing the user's code. Accepts a project zip (opens it and returns a state_id) or a state_id. Reads the files directly, so it also works on projects that don't compile."""
     project = C.load_project(ctx, args.project)
     assert project is not None
     uncertain: list[str] = []
@@ -455,14 +616,37 @@ def inspect_project(args: InspectIn, ctx: ToolContext) -> ToolResult[InspectOut]
     renderer = C.renderer_of(project)
     if renderer != "gl_compatibility":
         uncertain.append(f"The project uses the {renderer} renderer; runs here use the Compatibility (OpenGL) renderer, so visuals may differ.")
+    contents: list[FileText] = []
+    extra_outputs: list[OutputFile] = []
+    budget = 12_000
+    for idx, rp in enumerate(args.read_files):
+        rel = C.res_to_rel(rp)
+        fp = project / rel
+        if not fp.is_file():
+            uncertain.append(f"{rp} does not exist in the project.")
+            continue
+        if (fp.suffix.lower() not in TEXT_EXT) and fp.name != "project.godot":
+            uncertain.append(f"{rp} is not a text file, so its contents are not shown.")
+            continue
+        text = fp.read_text(errors="replace")
+        cut = text[:max(budget, 0)]
+        budget -= len(cut)
+        contents.append(FileText(path=C.rel_to_res(rel), text=cut, lines=text.count("\n") + (0 if text.endswith("\n") else 1),
+                                 truncated=len(cut) < len(text)))
+        if len(cut) < len(text):
+            full = ctx.output_path(f"full_{idx}_{fp.name}")
+            full.write_text(text)
+            extra_outputs.append(OutputFile(full, f"Full text of {C.rel_to_res(rel)}"))
+            uncertain.append(f"{rp} was cut at {len(cut)} of {len(text)} characters (12,000 per call); the whole file is attached as {full.name}.")
     out = InspectOut(project_name=C.project_name_of(project), config_version=cfg_v, renderer=renderer, main_scene=main,
-                     scenes=scenes, scripts=scripts, input_actions=actions, autoloads=autos, file_count=len(C.project_files(project)))
+                     scenes=scenes, scripts=scripts, input_actions=actions, autoloads=autos, file_count=len(C.project_files(project)),
+                     file_contents=contents)
     full_map.update({"project_name": out.project_name, "main_scene": main, "input_actions": actions, "autoloads": autos, "renderer": renderer})
     mp = ctx.output_path("project_map.json")
     mp.write_text(json.dumps(full_map, indent=1))
     ctx.mark_untrusted("project files")
     return ToolResult(
-        data=out, outputs=[OutputFile(mp, "Full project map: every scene's nodes and connections, every script's members.")],
+        data=out, outputs=[OutputFile(mp, "Full project map: every scene's nodes and connections, every script's members.")] + extra_outputs,
         summary=f"'{out.project_name}': {len(scenes)} scene(s), {len(scripts)} script(s), {len(actions)} input action(s), main scene {main or 'not set'}",
         uncertain=uncertain,
         next_step="Pass the state_id to later calls. Use the input action names and node paths shown here in playtest_game steps.",

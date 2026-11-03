@@ -245,3 +245,116 @@ def output_path(result: dict, name: str) -> pathlib.Path:
         if o["name"] == name:
             return pathlib.Path(o["path"])
     raise AssertionError(f"no output {name}: {[o['name'] for o in result['outputs']]}")
+
+
+# Godot 3 leftovers like the "Meadow Dash" case: an exported coin value set in the scene on a node whose script
+# doesn't compile yet, plus a node pointing at a script that doesn't exist.
+G3_COIN_GD = """extends Area2D
+
+signal collected(value)
+
+export var value = 1
+
+
+func _ready():
+	body_entered.connect(_on_body)
+
+
+func _on_body(body):
+	if body.is_in_group("player"):
+		collected.emit(value)
+		queue_free()
+"""
+
+G3_MAIN_GD = """extends Node2D
+
+var score := 0
+
+
+func _ready() -> void:
+	for c in get_tree().get_nodes_in_group("coins"):
+		c.collected.connect(_on_coin_collected)
+
+
+func _on_coin_collected(value) -> void:
+	score += value
+"""
+
+G3_MAIN_TSCN = """[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+[ext_resource type="Script" path="res://coin.gd" id="2"]
+[ext_resource type="Script" path="res://music.gd" id="3"]
+
+[sub_resource type="CircleShape2D" id="c"]
+radius = 12.0
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player"]]
+position = Vector2(100, 100)
+
+[node name="Shape" type="CollisionShape2D" parent="Player"]
+shape = SubResource("c")
+
+[node name="Coin" type="Area2D" parent="." groups=["coins"]]
+position = Vector2(300, 100)
+script = ExtResource("2")
+
+[node name="Shape" type="CollisionShape2D" parent="Coin"]
+shape = SubResource("c")
+
+[node name="BigCoin" type="Area2D" parent="." groups=["coins"]]
+position = Vector2(500, 100)
+script = ExtResource("2")
+value = 3
+
+[node name="Shape" type="CollisionShape2D" parent="BigCoin"]
+shape = SubResource("c")
+
+[node name="Music" type="Node" parent="."]
+script = ExtResource("3")
+"""
+
+
+@pytest.fixture(scope="session")
+def g3_coins_zip(tmp_path_factory) -> pathlib.Path:
+    d = tmp_path_factory.mktemp("g3coins")
+    src = write_project(d / "src", {"project.godot": PROJECT_GODOT.format(name="Coin Values"), "main.tscn": G3_MAIN_TSCN,
+                                    "main.gd": G3_MAIN_GD, "coin.gd": G3_COIN_GD})
+    return zip_dir(src, d / "coin_values.zip", top="coin_values")
+
+
+VAULT_MAIN_GD = """extends Node2D
+
+onready var guard = $Guard
+var treasure_goal := 7
+var ticks := 0
+"""
+
+VAULT_TSCN = """[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+[ext_resource type="Script" path="res://guard.gd" id="2"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Guard" type="Node2D" parent="."]
+position = Vector2(300, 200)
+script = ExtResource("2")
+
+[node name="Timer" type="Timer" parent="."]
+autostart = true
+
+[connection signal="timeout" from="Timer" to="." method="_on_timer_timeout"]
+"""
+
+
+@pytest.fixture(scope="session")
+def vault_zip(tmp_path_factory) -> pathlib.Path:
+    d = tmp_path_factory.mktemp("vault")
+    src = write_project(d / "src", {"project.godot": PROJECT_GODOT.format(name="Vault"), "main.tscn": VAULT_TSCN,
+                                    "main.gd": VAULT_MAIN_GD})
+    return zip_dir(src, d / "vault.zip")

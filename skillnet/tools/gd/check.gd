@@ -90,7 +90,10 @@ func _check_scene(p: String) -> Dictionary:
 				var sc = st.get_node_property_value(i, k)
 				if sc == null or (sc is Script and not sc.can_instantiate()):
 					entry["ok"] = false
-					entry["problems"].append("node '%s' has a script that failed to load" % str(np))
+					var sp := ""
+					if sc is Script and sc.resource_path != "":
+						sp = " (%s)" % sc.resource_path
+					entry["problems"].append("node '%s' has a script that failed to load%s" % [str(np), sp])
 	for c in st.get_connection_count():
 		var src := st.get_connection_source(c)
 		var tgt := st.get_connection_target(c)
@@ -110,7 +113,14 @@ func _check_scene(p: String) -> Dictionary:
 			entry["ok"] = false
 			entry["problems"].append("connection: node '%s' has no signal '%s'" % [str(src), sig])
 		if not tn.has_method(method):
+			var tsc = tn.get_script()
+			var where := ""
+			if tsc is Script:
+				where = " (%s)" % tsc.resource_path
+				# A script that failed to compile has no methods at all: only flag the method when its text lacks it too.
+				if not tsc.can_instantiate() and RegEx.create_from_string("(?m)^\\s*(static\\s+)?func\\s+%s\\s*\\(" % method).search(tsc.source_code) != null:
+					continue
 			entry["ok"] = false
-			entry["problems"].append("connection '%s': node '%s' has no method '%s'" % [sig, str(tgt), method])
+			entry["problems"].append("%s.%s is connected to '%s' on '%s'%s, which has no method '%s'; add func %s() there or remove the connection" % [sn.name, sig, method, tn.name, where, method, method])
 	inst.free()
 	return entry

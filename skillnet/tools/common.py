@@ -441,6 +441,28 @@ def state_project(ctx: ToolContext) -> Path:
     return ctx.state_dir / "project"
 
 
+# Godot 3 constructs and the Godot 4 form, appended to parse errors so the fix (and the report) is plain.
+GODOT3_HINTS = [
+    (re.compile(r'identifier "onready"'), 'Godot 3 syntax: write "@onready var" in Godot 4'),
+    (re.compile(r'identifier "export"'), 'Godot 3 syntax: write "@export var" in Godot 4'),
+    (re.compile(r'identifier "tool"'), 'Godot 3 syntax: write "@tool" in Godot 4'),
+    (re.compile(r'"yield"'), 'Godot 3 syntax: use "await signal" in Godot 4'),
+    (re.compile(r'argument for "connect\(\)"|"connect\(\)" function'), 'Godot 3 connect("signal", self, "method"): in Godot 4 write signal_name.connect(method)'),
+    (re.compile(r'"emit_signal\(\)"'), 'Godot 3 style: in Godot 4 prefer signal_name.emit(args)'),
+    (re.compile(r'"instance\(\)"|function "instance"'), 'Godot 3 name: use instantiate() in Godot 4'),
+]
+
+
+def godot4_hint(message: str) -> str:
+    """Append a plain Godot 3 -> 4 hint to an engine message when it matches a known Godot 3 construct."""
+    if "Godot 3" in message:
+        return message
+    for pat, hint in GODOT3_HINTS:
+        if pat.search(message):
+            return f"{message} ({hint})"
+    return message
+
+
 def load_project(ctx: ToolContext, project_zip: Path | None, *, required: bool = True) -> Path | None:
     """Open the project for this call: an uploaded zip (replaces the state's project) or the state."""
     dest = state_project(ctx)
@@ -464,6 +486,7 @@ def load_project(ctx: ToolContext, project_zip: Path | None, *, required: bool =
                                 "Ask the user to convert it with the Godot 4 editor's project converter, or rebuild the game with create_game_project.")
             if dest.exists():
                 shutil.rmtree(dest)
+            (dest.parent / "check_history.json").unlink(missing_ok=True)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(root), str(dest))
         finally:

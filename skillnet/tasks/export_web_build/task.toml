@@ -13,7 +13,7 @@ name = "SkillNet Agent"
 [metadata]
 [metadata.skillnet]
 skill = "instant-game-studio"
-version = 1
+version = 3
 task = "export_web_build"
 ability = "Export a playable build"
 core = false

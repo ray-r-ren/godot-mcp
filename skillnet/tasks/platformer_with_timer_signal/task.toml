@@ -1,0 +1,46 @@
+schema_version = "1.4"
+source = "skillnet"
+artifacts = ["/task/outputs", "/task/answer.txt"]
+
+[task]
+name = "skillnet/instant-game-studio-platformer_with_timer_signal"
+description = "Instant Game Studio — Start and shape a game project: Make me a small platformer in Godot 4 called \"Tower Climb\": a player that runs left and right and jumps, standing on a floor."
+keywords = ["skillnet", "instant-game-studio", "start-and-shape-a-game-project"]
+
+[[task.authors]]
+name = "SkillNet Agent"
+
+[metadata]
+[metadata.skillnet]
+skill = "instant-game-studio"
+version = 3
+task = "platformer_with_timer_signal"
+ability = "Start and shape a game project"
+core = true
+source = "builder"
+judge = "programmatic"
+prompt = "Make me a small platformer in Godot 4 called \"Tower Climb\": a player that runs left and right and jumps, standing on a floor.\n\nI also want a 60-second countdown:\n\n- in the main scene, add a Timer node named `Countdown` that fires once every second;\n- connect its timeout signal to a method on the main scene's script;\n- that method lowers a variable called `time_left` (it starts at 60) by 1, and the time left is shown on screen.\n\nMake sure the project has no errors, then give me the project as a zip."
+
+[agent]
+timeout_sec = 900
+user = "agent"
+
+[verifier]
+timeout_sec = 600
+environment_mode = "separate"
+
+[environment]
+build_timeout_sec = 1800
+cpus = 4
+memory_mb = 6144
+workdir = "/task"
+network_mode = "allowlist"
+allowed_hosts = ["skillnet.sh"]
+
+[[environment.mcp_servers]]
+name = "skillnet"
+transport = "streamable-http"
+url = "https://skillnet.sh/mcp"
+
+[environment.mcp_servers.headers]
+Authorization = "Bearer ${SKILLNET_API_KEY}"

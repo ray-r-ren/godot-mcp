@@ -147,3 +147,18 @@ def test_inspect_refuses_godot3(session, godot3_zip):
     r = session.call(P.inspect_project, {"project": str(godot3_zip)})
     assert r["status"] == "error" and r["error"]["code"] == "godot3_project"
     assert "create_game_project" in r["next_step"]
+
+
+def test_create_name_with_spaces_and_unicode(session):
+    r = session.call(P.create_game_project, {"name": "Café Hüpfer – Level 1", "starter": "blank_2d"})
+    assert r["status"] == "ok", r
+    assert r["data"]["project_name"] == "Café Hüpfer – Level 1" and r["data"]["starts_cleanly"] is True
+    text = (session.project / "project.godot").read_text(encoding="utf-8")
+    assert 'config/name="Café Hüpfer – Level 1"' in text
+
+
+def test_edit_scenes_without_project_errors(session):
+    r = session.call(P.edit_scenes, {"operations": [
+        {"op": "add_node", "scene": "res://scenes/main.tscn", "parent": ".", "type": "Timer", "name": "T"}]})
+    assert r["status"] == "error" and r["error"]["code"] == "no_project"
+    assert "state_id" in r["next_step"]

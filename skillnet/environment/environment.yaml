@@ -1,39 +1,57 @@
 engines: []
 apt:
-- unzip
-- libgl1
-- libgl1-mesa-dri
-- libegl1
-- libgles2
-- libxcursor1
-- libxinerama1
-- libxrandr2
-- libxi6
-- libxkbcommon0
-- libxrender1
-- libasound2
-- libpulse0
-- libfontconfig1
-- fonts-dejavu-core
-- xvfb
-- xauth
-- libglx-mesa0
+  - curl
+  - ca-certificates
+  - unzip
+  - libgl1
+  - libgl1-mesa-dri
+  - libegl1
+  - libgles2
+  - libxcursor1
+  - libxinerama1
+  - libxrandr2
+  - libxi6
+  - libxkbcommon0
+  - libxrender1
+  - libasound2
+  - libpulse0
+  - libfontconfig1
+  - fonts-dejavu-core
+  - xvfb
+  - xauth
+  - libglx-mesa0
 pip:
-- pillow==11.0.0
+  - pillow==11.1.0
 run:
-- curl -fsSL -o /tmp/godot.zip https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
-  && unzip -q /tmp/godot.zip -d /opt/godot && mv /opt/godot/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot
-  && chmod 755 /usr/local/bin/godot && rm -rf /tmp/godot.zip /opt/godot
-- mkdir -p /opt/godot-data/godot/export_templates/4.4.1.stable && curl -fsSL -o /tmp/tpl.tpz https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz
-  && unzip -q -j /tmp/tpl.tpz templates/linux_release.x86_64 templates/linux_debug.x86_64 templates/web_nothreads_release.zip
-  templates/web_nothreads_debug.zip templates/version.txt -d /opt/godot-data/godot/export_templates/4.4.1.stable
-  && rm -f /tmp/tpl.tpz && chmod -R a+rX /opt/godot-data
+  - curl -fsSL -o /tmp/godot.zip
+    https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
+    && unzip -q /tmp/godot.zip -d /opt/godot && mv
+    /opt/godot/Godot_v4.4.1-stable_linux.x86_64 /usr/local/bin/godot && chmod
+    755 /usr/local/bin/godot && rm -rf /tmp/godot.zip /opt/godot
+  - mkdir -p /opt/godot-data/godot/export_templates/4.4.1.stable && curl -fsSL
+    -o /tmp/tpl.tpz
+    https://github.com/godotengine/godot/releases/download/4.4.1-stable/Godot_v4.4.1-stable_export_templates.tpz
+    && unzip -q -j /tmp/tpl.tpz templates/linux_release.x86_64
+    templates/linux_debug.x86_64 templates/web_nothreads_release.zip
+    templates/web_nothreads_debug.zip templates/version.txt -d
+    /opt/godot-data/godot/export_templates/4.4.1.stable && rm -f /tmp/tpl.tpz &&
+    chmod -R a+rwX /opt/godot-data
+  - mkdir -p /root/.local/share && ln -sfn /opt/godot-data/godot
+    /root/.local/share/godot
 smoke:
-- godot --headless --version | grep -q '4.4.1.stable'
-- ls /opt/godot-data/godot/export_templates/4.4.1.stable/web_nothreads_release.zip /opt/godot-data/godot/export_templates/4.4.1.stable/linux_release.x86_64
-- mkdir -p /tmp/sm && printf 'config_version=5\n[application]\nrun/main_scene="res://m.tscn"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n'
-  > /tmp/sm/project.godot && printf '[gd_scene format=3]\n[node name="M" type="ColorRect"]\noffset_right=1200.0\noffset_bottom=800.0\ncolor=Color(1,0,0,1)\n'
-  > /tmp/sm/m.tscn && godot --headless --path /tmp/sm --import && LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a
-  -s '-screen 0 1280x720x24' godot --path /tmp/sm --rendering-driver opengl3 --write-movie /tmp/sm/f.png
-  --fixed-fps 10 --quit-after 5 && python3 -c "from PIL import Image; im=Image.open('/tmp/sm/f00000003.png').convert('RGB');
-  p=im.getpixel((100,100)); assert p[0]>200 and p[1]<60, p"
+  - godot --headless --version | grep -q '4.4.1.stable'
+  - ls
+    /opt/godot-data/godot/export_templates/4.4.1.stable/web_nothreads_release.zip
+    /opt/godot-data/godot/export_templates/4.4.1.stable/linux_release.x86_64
+  - mkdir -p /tmp/smk && printf 'config_version=5\n' > /tmp/smk/project.godot &&
+    godot --headless --path /tmp/smk --import
+  - mkdir -p /tmp/sm && printf
+    'config_version=5\n[application]\nrun/main_scene="res://m.tscn"\n[rendering]\nrenderer/rendering_method="gl_compatibility"\n'
+    > /tmp/sm/project.godot && printf '[gd_scene format=3]\n[node name="M"
+    type="ColorRect"]\noffset_right=1200.0\noffset_bottom=800.0\ncolor=Color(1,0,0,1)\n'
+    > /tmp/sm/m.tscn && godot --headless --path /tmp/sm --import &&
+    LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s '-screen 0 1280x720x24' godot --path
+    /tmp/sm --rendering-driver opengl3 --write-movie /tmp/sm/f.png --fixed-fps
+    10 --quit-after 5 && python3 -c "from PIL import Image;
+    im=Image.open('/tmp/sm/f00000003.png').convert('RGB');
+    p=im.getpixel((100,100)); assert p[0]>200 and p[1]<60, p"

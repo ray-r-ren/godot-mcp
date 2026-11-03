@@ -1,0 +1,27 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
+[ext_resource type="Script" path="res://scripts/player.gd" id="2_player"]
+[ext_resource type="Script" path="res://scripts/frog_ai.gd" id="3_frog"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_p"]
+size = Vector2(20, 20)
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1_main")
+
+[node name="Water" type="ColorRect" parent="."]
+offset_right = 640.0
+offset_bottom = 360.0
+color = Color(0.1, 0.35, 0.55, 1)
+
+[node name="Player" type="CharacterBody2D" parent="."]
+position = Vector2(320, 180)
+script = ExtResource("2_player")
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Player"]
+shape = SubResource("RectangleShape2D_p")
+
+[node name="Frog" type="Node2D" parent="."]
+position = Vector2(500, 200)
+script = ExtResource("3_frog")

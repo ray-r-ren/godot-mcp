@@ -13,7 +13,7 @@ name = "SkillNet Agent"
 [metadata]
 [metadata.skillnet]
 skill = "instant-game-studio"
-version = 1
+version = 3
 task = "fix_broken_project"
 ability = "Check a project"
 core = true

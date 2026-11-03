@@ -18,11 +18,17 @@ Call `create_game_project` with the closest starter for a new game, or `inspect_
 ## Stages
 
 1. **Start**: call `create_game_project` (name, starter, optional window size). Check `starts_cleanly: true`. For an uploaded game, call `inspect_project` (`detail: "full"` shows each scene's node tree) and note `main_scene`, `input_actions`, the scripts' methods and their variables.
-2. **Build**: put the game rules in GDScript with `write_game_files` (whole files at `res://` paths, up to 50 per call; `delete` removes files). Build nodes, signals, groups and input actions with `edit_scenes` instead of hand-writing `.tscn` text.
+2. **Build**: put the game rules in GDScript with `write_game_files` (whole files at `res://` paths, up to 50 per call; `edits` changes lines in place; `delete` removes files). Build nodes, signals, groups and input actions with `edit_scenes` instead of hand-writing `.tscn` text.
    - `write_game_files` compiles every `.gd` it writes. Fix each `script_errors` entry (path + line) before going on.
    - `edit_scenes` is all-or-nothing. When `failed_op` is set nothing was saved. Its message lists the scene's real node paths, so fix that op and send the whole batch again.
    - Write the method first, or in the same round, when you connect a signal to it. `connect_signal` accepts a method that doesn't exist yet and only notes it; `check_project` then reports it as an error.
-3. **Check**: call `check_project` until `verdict` is `ready`. It compiles every script, loads and instantiates every scene, and reports missing scripts or resources, signal connections to missing methods, and a bad main scene, each with file and line.
+3. **Check**: call `check_project` and loop until `verdict` is `ready`. It compiles every script, loads and instantiates every scene, and reports missing scripts or resources, signal connections to missing methods, and a bad main scene, each in `errors[]` with `file`, `line` (null for scene-level problems) and `message`.
+   - Your own project: pass the `state_id`. An uploaded project (even one that won't open): pass `project=<file_id>` directly; you don't need `inspect_project` first. The result's `state_id` holds the opened project.
+   - Fix each error with `write_game_files` (scripts) or `edit_scenes` (nodes, connections, `set_main_scene`) using that `state_id`, then call `check_project` again with the same `state_id`. Godot reports one parse error per script, so expect a second round.
+   - **Keep the user's code.** Before changing a user's script, read it with `inspect_project` `read_files: ["res://scripts/main.gd"]` (full text in `file_contents`). Change only the broken lines with `write_game_files` `edits: [{"path": "res://scripts/main.gd", "find": "onready var guard", "replace": "@onready var guard"}]`. To add a missing method, append it by replacing the file's last line with that line plus the new function. `find` must match exactly once (`all: true` replaces every match); otherwise nothing is written and the error shows the closest line. Rewrite a whole file only for code you created yourself.
+   - A main-scene error (`res://project.godot`: "the main scene … does not exist") is fixed with `edit_scenes` op `set_main_scene`; the `next_step` lists the scenes to choose from.
+   - Parse errors from Godot 3 code carry a hint in brackets, e.g. `(Godot 3 syntax: write "@onready var" in Godot 4)`.
+   - The final `ready` result's `fixed_since_first_check` lists every problem the earlier checks of this project found (`file:line — message`). Use it for the "what was wrong" report.
 4. **Run**: call `run_game` with `seconds` 3–5 and a few `screenshot_at` times. Confirm `crashed: false`, an empty `runtime_errors` and `finished: true`, and look at the screenshots yourself. Use `record_video: true` when the user wants to see motion.
 5. **Play-test**: call `playtest_game` with steps that act out what the user asked for, each followed by an `assert` on live state, for example "collect a coin → score goes up" or "press jump → player leaves the floor". Add `screenshot` steps at key moments.
 6. **Iterate**: fix with `write_game_files` / `edit_scenes`, then repeat stages 3–5 until every assertion passes and no runtime errors remain.
@@ -60,6 +66,13 @@ Each step has exactly one of these keys (full syntax in [references/playtest.md]
 4. Run `check_project`, then `run_game` with `record_video: true`.
 5. `playtest_game`: `wait_ms` 3000, then assert that blocks exist (`get_tree().get_nodes_in_group('blocks').size() > 0`). Hold `move_left`, then assert that `$Player.position.x` dropped.
 
+**"Add a 60-second countdown to my platformer."** (a signal to a method that doesn't exist yet)
+
+1. `edit_scenes`: `add_node` a Timer `Countdown` (`wait_time` 1, `autostart` true) and `connect_signal` `Countdown.timeout` → target `.` method `_on_countdown_timeout`. The op succeeds with "note: 'Main' has no method '_on_countdown_timeout' yet".
+2. `check_project` → `has_errors`: `res://scenes/main.tscn` "Countdown.timeout is connected to '_on_countdown_timeout' on 'Main' (res://scripts/main.gd), which has no method '_on_countdown_timeout'; …".
+3. `write_game_files`: the whole `res://scripts/main.gd` with `var time_left := 60` and `func _on_countdown_timeout() -> void:` that counts down. `ok: true`.
+4. `check_project` again → `ready`. Then `playtest_game`: `wait_ms` 2000, assert `time_left <= 58`.
+
 **"My uploaded game shows a grey screen and the log has errors."**
 
 1. Call `inspect_project` with the zip.
@@ -70,6 +83,7 @@ Each step has exactly one of these keys (full syntax in [references/playtest.md]
 ## Pitfalls
 
 - **Godot 3 code fails.** `onready`, `export var`, `yield`, `KinematicBody2D`, `instance()` and `connect("signal", self, "method")` are Godot 3. Use `@onready`, `@export`, `await`, `CharacterBody2D`, `instantiate()` and `signal.connect(callable)`. Example error: `Parse Error: Unexpected identifier "onready" in class body.` Godot 3 project zips (`config_version` < 5) are refused with `godot3_project`.
+- **Editing scenes while scripts are broken.** Godot can't load a broken script's exported values (e.g. a coin's `value = 3`), so `edit_scenes` copies them back into the saved scene and lists them in `uncertain` ("copied back unchanged"). Fixing the scripts first with `write_game_files` avoids this. Never rewrite a scene by hand without keeping those values.
 - **One parse error per file.** Godot stops at the first parse error in each script, so after fixing it a later error in the same file may show up.
 - **Unknown action names.** `action` steps need an action defined in the project. The error lists the real ones. Add new ones with `edit_scenes` op `add_input_action` (keys like `A`, `Space`, `Shift`, `mouse_left`).
 - **Wrong node paths.** If a path is wrong, the eval error reads "Invalid named index … for base type Object" and `runtime_errors` holds `Node not found: "X"`. Get the paths from `inspect_project` `detail: "full"`.
@@ -83,6 +97,7 @@ Each step has exactly one of these keys (full syntax in [references/playtest.md]
 ## Evidence
 
 - **Correct code:** the `check_project` verdict and its `errors` with file and line.
+- **What was wrong (repairs):** name every entry of `fixed_since_first_check` from the final check, each with its file, line and the exact name involved: the keyword (`onready`), the missing file path (`res://scripts/guard.gd`) or the method (`_on_timer_timeout`) and its signal. Say how you fixed each. "Fixed three problems" without the names is not a report.
 - **It runs:** `run_game` with `crashed`, `runtime_errors` and `frames_rendered`. Show `contact_sheet.png` or the screenshots, and `gameplay.mp4` if recorded. When the user asks what colour something is, quote the screenshot's `dominant_color` (the most common exact pixel colour, normally the background; `dominant_share` says how much of the frame it covers) rather than `mean_color`, which blends in every sprite. Colours set by scripts at start-up differ from the .tscn values, so read them from a run, not the files.
 - **It plays:** every `playtest_game` assertion with its label, `passed` and the measured `value` (e.g. "score went 0 → 1", "x 576 → 876"), plus the named screenshots.
 - **The build:** `export_game` `files` with sizes, and `smoke_ok` for Linux.

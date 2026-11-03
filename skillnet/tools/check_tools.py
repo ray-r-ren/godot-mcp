@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import tempfile
 import zipfile
@@ -35,6 +36,7 @@ class CheckOut(ToolOutput):
     scripts_checked: int
     scenes_checked: int
     main_scene: Optional[str]
+    fixed_since_first_check: list[str] = Field(default_factory=list, description="Problems an earlier check of this project reported that are gone now (file:line — message), so the whole repair can be reported.")
 
 
 def _p(d: dict) -> Problem:
@@ -66,37 +68,92 @@ def check_project(args: CheckIn, ctx: ToolContext) -> ToolResult[CheckOut]:
     scenes = [C.rel_to_res(str(p.relative_to(project))) for p in scene_files]
     errs, warns, raw = run_checker(ctx, project, scripts, scenes)
     # Drop engine duplicates of missing references we already reported.
-    missing = {e["message"].split(" ")[1] for e in errors if e["message"].startswith("references ")}
+    missing = {e["message"].split(" ")[1].rstrip(",") for e in errors if e["message"].startswith("references ")}
+    bad_main = main if errors and errors[0].get("file") == "res://project.godot" and main else None
+    if bad_main:
+        missing.add(bad_main)  # the engine's own "cannot open" lines for the missing main scene add nothing
     for e in errs:
-        if any(m in e.get("message", "") for m in missing) and "Parse Error" not in e.get("message", ""):
+        msg = e.get("message", "")
+        if any(m in msg for m in missing) and (e.get("file") in missing or "Parse Error" not in msg
+                                                or "non-existent" in msg):
             continue
         errors.append(e)
     warnings += warns
     if raw:
         for s in raw.get("scenes", []):
             for prob in s.get("problems", []):
+                if "script that failed to load" in prob:
+                    # A consequence of a parse error or missing script already listed: skip the echo.
+                    m = re.search(r"\((res://[^)]+)\)$", prob)
+                    if m and any(e.get("file") == m.group(1) for e in errors):
+                        continue
+                    if not m and any(e.get("file") == s["path"] and "does not exist" in e.get("message", "") for e in errors):
+                        continue
                 if not any(prob in str(e.get("message")) for e in errors):
                     errors.append({"file": s["path"], "message": prob})
         for s in raw.get("scripts", []):
             if not s.get("ok") and not any(e.get("file") == s["path"] for e in errors):
                 errors.append({"file": s["path"], "message": "the script failed to compile"})
     verdict = "ready" if not errors else "has_errors"
+    fixed = _update_history(ctx, errors)
     report = ctx.output_path("check_report.json")
     report.write_text(json.dumps({"verdict": verdict, "errors": errors, "warnings": warnings, "main_scene": main,
                                   "scripts": raw.get("scripts") if raw else None, "scenes": raw.get("scenes") if raw else None}, indent=1))
     ctx.mark_untrusted("engine output")
     out = CheckOut(verdict=verdict, errors=[_p(e) for e in errors[:40]], warnings=[_p(w) for w in warnings[:20]],
-                   scripts_checked=len(scripts), scenes_checked=len(scenes), main_scene=main)
+                   scripts_checked=len(scripts), scenes_checked=len(scenes), main_scene=main,
+                   fixed_since_first_check=fixed[:40])
     uncertain = []
     if len(errors) > 40:
         uncertain.append(f"{len(errors)} errors found; the first 40 are listed, all are in check_report.json.")
     if verdict == "ready":
         return ToolResult(data=out, outputs=[OutputFile(report, "Full check report")], uncertain=uncertain,
-                          summary=f"Ready: {len(scripts)} scripts and {len(scenes)} scenes load without errors",
-                          next_step="Call run_game to see it running, then playtest_game to check the gameplay.")
+                          summary=f"Ready: {len(scripts)} scripts and {len(scenes)} scenes load without errors"
+                                  + (f"; {len(fixed)} earlier problem(s) fixed" if fixed else ""),
+                          next_step=("When you report the repair, name each entry of fixed_since_first_check with its file, line "
+                                     "and the exact name involved (method, file path, keyword). " if fixed else "")
+                                    + "Call run_game to see it running, then playtest_game to check the gameplay.")
     return ToolResult(data=out, outputs=[OutputFile(report, "Full check report")], uncertain=uncertain,
-                      summary=f"{len(errors)} error(s) found in {len({e.get('file') for e in errors})} file(s)",
-                      next_step="Fix the errors (file and line given) with write_game_files or edit_scenes, then call check_project again.")
+                      summary=f"{len(errors)} error(s) found in {len({e.get('file') for e in errors})} file(s): "
+                              + "; ".join(_short(e) for e in errors[:3])[:400],
+                      next_step=_fix_hint(errors, main, scenes))
+
+
+def _short(e: dict) -> str:
+    where = (e.get("file") or "project") + (f":{e['line']}" if e.get("line") else "")
+    return f"{where} — {e.get('message', '')}"
+
+
+def _update_history(ctx: ToolContext, errors: list[dict]) -> list[str]:
+    """Remember every problem seen since the project was opened; return the ones that are gone now."""
+    hist_path = ctx.state_dir / "check_history.json"
+    try:
+        seen = json.loads(hist_path.read_text()) if hist_path.is_file() else []
+    except (OSError, ValueError):
+        seen = []
+    key = lambda e: f"{e.get('file') or ''}|{e.get('message', '')}"  # noqa: E731  (lines move while fixing)
+    current = {key(e) for e in errors}
+    known = {x["key"] for x in seen}
+    for e in errors:
+        if key(e) not in known:
+            seen.append({"key": key(e), "text": _short(e)[:300]})
+            known.add(key(e))
+    try:
+        hist_path.write_text(json.dumps(seen[-200:]))
+    except OSError:
+        pass
+    return [x["text"] for x in seen if x["key"] not in current]
+
+
+def _fix_hint(errors: list[dict], main: str | None, scenes: list[str]) -> str:
+    hint = ("Fix the errors (file and line given) with write_game_files or edit_scenes, pass the state_id this result "
+            "returned. To keep the user's code, read a script with inspect_project read_files and change only the broken "
+            "lines with write_game_files edits [{path, find, replace}], then call check_project again until the verdict is 'ready'; that result lists every problem fixed "
+            "since this check in fixed_since_first_check, for your report to the user.")
+    if any(e.get("file") == "res://project.godot" and "main scene" in e.get("message", "") for e in errors):
+        choices = ", ".join(scenes[:8]) or "none yet (create one with edit_scenes op create_scene)"
+        hint += f" For the main scene, use edit_scenes op set_main_scene with one of the project's scenes: {choices}."
+    return hint
 
 
 # =============================================================================== export

@@ -13,7 +13,7 @@ name = "SkillNet Agent"
 [metadata]
 [metadata.skillnet]
 skill = "instant-game-studio"
-version = 1
+version = 3
 task = "build_coin_collector"
 ability = "Start and shape a game project"
 core = true
