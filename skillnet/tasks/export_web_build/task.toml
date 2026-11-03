@@ -1,0 +1,46 @@
+schema_version = "1.4"
+source = "skillnet"
+artifacts = ["/task/outputs", "/task/answer.txt"]
+
+[task]
+name = "skillnet/instant-game-studio-export_web_build"
+description = "Instant Game Studio — Export a playable build: I made a tiny Godot 4 game called \"Star Hop\" (the project is attached as a zip). I want to put it on itch.io so people can play it in their browser."
+keywords = ["skillnet", "instant-game-studio", "export-a-playable-build"]
+
+[[task.authors]]
+name = "SkillNet Agent"
+
+[metadata]
+[metadata.skillnet]
+skill = "instant-game-studio"
+version = 1
+task = "export_web_build"
+ability = "Export a playable build"
+core = false
+source = "builder"
+judge = "programmatic"
+prompt = "I made a tiny Godot 4 game called \"Star Hop\" (the project is attached as a zip). I want to put it on itch.io so people can play it in their browser.\n\nPlease export it as a web (HTML5) build and give me the build as a zip file I can upload. Tell me briefly what's inside the zip."
+
+[agent]
+timeout_sec = 900
+user = "agent"
+
+[verifier]
+timeout_sec = 600
+environment_mode = "separate"
+
+[environment]
+build_timeout_sec = 1800
+cpus = 4
+memory_mb = 6144
+workdir = "/task"
+network_mode = "allowlist"
+allowed_hosts = ["skillnet.sh"]
+
+[[environment.mcp_servers]]
+name = "skillnet"
+transport = "streamable-http"
+url = "https://skillnet.sh/mcp"
+
+[environment.mcp_servers.headers]
+Authorization = "Bearer ${SKILLNET_API_KEY}"

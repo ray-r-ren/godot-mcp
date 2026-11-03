@@ -1,0 +1,9 @@
+[
+  {
+    "title": "A platformer, created and play-tested",
+    "kind": "image",
+    "input": "Make me a little platformer called Sky Hopper where you collect coins.",
+    "output": "platformer_playtest.png",
+    "caption": "Screenshots taken during an automatic play-test: the player runs right, jumps and lands; the check that the player moved passed."
+  }
+]

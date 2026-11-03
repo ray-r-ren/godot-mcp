@@ -1,0 +1,124 @@
+[gd_scene load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1"]
+[ext_resource type="Script" path="res://player.gd" id="2"]
+[ext_resource type="Script" path="res://gem.gd" id="3"]
+
+[sub_resource type="RectangleShape2D" id="p"]
+size = Vector2(24, 24)
+
+[sub_resource type="CircleShape2D" id="g"]
+radius = 12.0
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Bg" type="ColorRect" parent="."]
+offset_right = 960.0
+offset_bottom = 640.0
+color = Color(0.15, 0.3, 0.18, 1)
+
+[node name="Player" type="CharacterBody2D" parent="." groups=["player"]]
+position = Vector2(100, 300)
+script = ExtResource("2")
+
+[node name="Look" type="ColorRect" parent="Player"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(1, 0.9, 0.4, 1)
+
+[node name="Shape" type="CollisionShape2D" parent="Player"]
+shape = SubResource("p")
+
+[node name="Gem1" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(250, 300)
+script = ExtResource("3")
+value = 5
+
+[node name="Look" type="ColorRect" parent="Gem1"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem1"]
+shape = SubResource("g")
+
+[node name="Gem2" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(480, 300)
+script = ExtResource("3")
+value = 2
+
+[node name="Look" type="ColorRect" parent="Gem2"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem2"]
+shape = SubResource("g")
+
+[node name="Gem3" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(690, 300)
+script = ExtResource("3")
+value = 5
+
+[node name="Look" type="ColorRect" parent="Gem3"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem3"]
+shape = SubResource("g")
+
+[node name="Gem4" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(600, 450)
+script = ExtResource("3")
+value = 2
+
+[node name="Look" type="ColorRect" parent="Gem4"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem4"]
+shape = SubResource("g")
+
+[node name="Gem5" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(600, 620)
+script = ExtResource("3")
+value = 10
+
+[node name="Look" type="ColorRect" parent="Gem5"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem5"]
+shape = SubResource("g")
+
+[node name="Gem6" type="Area2D" parent="." groups=["gems"]]
+position = Vector2(300, 500)
+script = ExtResource("3")
+value = 2
+
+[node name="Look" type="ColorRect" parent="Gem6"]
+offset_left = -10.0
+offset_top = -10.0
+offset_right = 10.0
+offset_bottom = 10.0
+
+[node name="Shape" type="CollisionShape2D" parent="Gem6"]
+shape = SubResource("g")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="ScoreLabel" type="Label" parent="HUD"]
+offset_left = 12.0
+offset_top = 8.0
+text = "Score: 0"

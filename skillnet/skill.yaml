@@ -1,0 +1,944 @@
+cost:
+  typical_seconds: 15
+name: Instant Game Studio
+slug: instant-game-studio
+tools:
+  - kind: check
+    name: check_project
+    title: Check a game project for errors
+    timeout_s: 300
+    description: "Use after any change and before running: imports the project headlessly with Godot 4.4, compiles every GDScript, loads every scene and reports missing scripts or resources, broken signal connections, a missing or bad main scene, and engine errors with file and line. Works on a state_id or an uploaded project zip. The verdict 'ready' means run_game can be tried; 'has_errors' lists what to fix with write_game_files or edit_scenes."
+    input_schema:
+      type: object
+      properties:
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: A Godot 4 project zip to check (opens it and returns a state_id). Omit when passing a state_id.
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+      additionalProperties: false
+    long_running: false
+    output_schema:
+      type: object
+      required:
+        - verdict
+        - errors
+        - warnings
+        - scripts_checked
+        - scenes_checked
+        - main_scene
+      properties:
+        errors:
+          type: array
+          items:
+            type: object
+            required:
+              - message
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              message:
+                type: string
+            additionalProperties: false
+        verdict:
+          enum:
+            - ready
+            - has_errors
+          type: string
+        warnings:
+          type: array
+          items:
+            type: object
+            required:
+              - message
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              message:
+                type: string
+            additionalProperties: false
+        main_scene:
+          anyOf:
+            - type: string
+            - type: "null"
+        scenes_checked:
+          type: integer
+        scripts_checked:
+          type: integer
+      additionalProperties: false
+    state_version: 1
+  - kind: create
+    name: create_game_project
+    title: Start a new Godot game project
+    timeout_s: 180
+    description: "Start here when the user describes a new game. Creates a Godot 4.4 project from a starter (top_down, platformer, blank_2d, blank_3d) with a main scene, a player with movement code, coins and a score label (2D starters), input actions move_left/right/up/down, jump, pause, and the software-safe renderer, then imports and runs it headlessly to prove it starts. Returns a state_id to pass to every later call, the project zip and its file list. Next: write_game_files / edit_scenes, then check_project."
+    input_schema:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          maxLength: 60
+          minLength: 1
+          description: The game's title, e.g. 'Coin Dash'. Used as the project name and window title.
+        starter:
+          enum:
+            - blank_2d
+            - top_down
+            - platformer
+            - blank_3d
+          type: string
+          default: top_down
+          description: "Starting point: top_down (8-way movement, coins, score), platformer (side view with gravity, jump, ledges, coins; 'side-scroller' or 'jump and run' means platformer), blank_2d (empty 2D scene with a…"
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+        window_width:
+          type: integer
+          default: 1152
+          maximum: 3840
+          minimum: 320
+          description: Game window width in pixels.
+        window_height:
+          type: integer
+          default: 648
+          maximum: 2160
+          minimum: 240
+          description: Game window height in pixels.
+      additionalProperties: false
+    long_running: false
+    output_schema:
+      type: object
+      required:
+        - project_name
+        - starter
+        - main_scene
+        - files
+        - input_actions
+        - starts_cleanly
+      properties:
+        files:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: object
+        starter:
+          type: string
+        main_scene:
+          type: string
+        project_name:
+          type: string
+        input_actions:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        starts_cleanly:
+          type: boolean
+      additionalProperties: false
+    state_version: 1
+  - kind: edit
+    name: edit_scenes
+    title: Edit scenes and project settings
+    timeout_s: 240
+    description: "Use to build or change scenes without hand-writing .tscn text; needs a state_id. Runs a batch through Godot's own scene API: create_scene, add_node, remove_node, rename_node, reparent_node, set_properties, attach_script, instantiate_scene, connect_signal, add_to_group, set_collision_layers, and project ops add_input_action, set_autoload, set_main_scene, set_setting. Stops at the first failing op and saves nothing then. Returns each op's result, the updated project zip and state_id."
+    input_schema:
+      type: object
+      required:
+        - operations
+      properties:
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+        operations:
+          type: array
+          items:
+            type: object
+            required:
+              - op
+            properties:
+              op:
+                enum:
+                  - create_scene
+                  - add_node
+                  - remove_node
+                  - rename_node
+                  - reparent_node
+                  - set_properties
+                  - attach_script
+                  - instantiate_scene
+                  - connect_signal
+                  - add_to_group
+                  - set_collision_layers
+                  - add_input_action
+                  - set_autoload
+                  - set_main_scene
+                  - set_setting
+                type: string
+                description: The operation (see the tool description for what each needs).
+              keys:
+                type: array
+                items:
+                  type: string
+                description: "add_input_action: key names (A, Space, Enter, Escape, Left, Up, Shift...) or mouse_left / mouse_right / mouse_middle."
+              mask:
+                type: array
+                items:
+                  type: integer
+                description: "set_collision_layers: layer numbers 1-32 the node detects."
+              name:
+                type: string
+                description: New node name (add_node, create_scene root, instantiate_scene, rename_node), input action name, or autoload name.
+              node:
+                type: string
+                description: "Node path relative to the scene root ('.' is the root, 'Player/Sprite' a child). For connect_signal: the node that emits."
+              type:
+                type: string
+                description: Godot class for add_node or the root of create_scene, e.g. CharacterBody2D, Area2D, Sprite2D, Label, Timer, Node3D.
+              scene:
+                type: string
+                description: res:// path of the .tscn to edit (or to create / make main).
+              value:
+                description: "set_setting: the new value."
+              groups:
+                type: array
+                items:
+                  type: string
+                description: "add_to_group (or add_node / instantiate_scene): group names."
+              layers:
+                type: array
+                items:
+                  type: integer
+                description: "set_collision_layers: layer numbers 1-32 the node is on."
+              method:
+                type: string
+                description: "connect_signal: method name on the target, e.g. _on_coin_body_entered."
+              parent:
+                type: string
+                description: Parent node path for add_node / instantiate_scene, or the new parent for reparent_node (default '.').
+              remove:
+                type: boolean
+                default: false
+                description: "set_autoload: remove the autoload instead of adding it."
+              script:
+                type: string
+                description: res:// path of a .gd script (attach_script, add_node, create_scene, set_autoload).
+              signal:
+                type: string
+                description: "connect_signal: signal name, e.g. body_entered, timeout, pressed."
+              target:
+                type: string
+                description: "connect_signal: node whose method is called (default '.', the root)."
+              setting:
+                type: string
+                description: "set_setting: project setting path, e.g. display/window/size/viewport_width or physics/2d/default_gravity."
+              properties:
+                type: object
+                description: "Property values: arrays become Vector2/Vector3/Color ([x,y], [x,y,z], [r,g,b,a]); colours also as '#rrggbb' or 'red'; resources as 'res://...' or {\"type\": \"RectangleShape2D\", \"size\": [32,32]}."
+              child_scene:
+                type: string
+                description: "instantiate_scene: res:// path of the scene to place inside `scene`."
+            additionalProperties: false
+          maxItems: 100
+          minItems: 1
+          description: Operations applied in order (up to 100). Nothing is saved if any operation fails.
+      additionalProperties: false
+    long_running: false
+    output_schema:
+      type: object
+      required:
+        - applied
+        - failed_op
+        - results
+        - scenes_changed
+      properties:
+        applied:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            required:
+              - op
+              - ok
+              - message
+            properties:
+              ok:
+                type: boolean
+              op:
+                type: string
+              message:
+                type: string
+            additionalProperties: false
+        failed_op:
+          anyOf:
+            - type: integer
+            - type: "null"
+        scenes_changed:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    state_version: 1
+  - kind: export
+    name: export_game
+    title: Export a playable Linux or Web build
+    timeout_s: 600
+    description: "Use when the user wants a build to play or share: exports the project with the installed Godot 4.4.1 templates to 'web' (single-threaded HTML5 build that plays from any static web host or itch.io) or 'linux' (x86_64 executable plus .pck). Checks the build files exist and, for Linux, runs the exported game headlessly for 2 seconds as a smoke test. Returns one zip of the build. Run check_project first; Windows, macOS and mobile exports are not available."
+    input_schema:
+      type: object
+      properties:
+        debug:
+          type: boolean
+          default: false
+          description: Export a debug build (prints errors to the console) instead of a release build.
+        target:
+          enum:
+            - web
+            - linux
+          type: string
+          default: web
+          description: "web: HTML5 build that plays in a browser from any static web host ('browser' or 'HTML5' means web); linux: x86_64 Linux executable plus .pck."
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: A Godot 4 project zip to export (omit when passing a state_id).
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+      additionalProperties: false
+    long_running: true
+    output_schema:
+      type: object
+      required:
+        - target
+        - files
+        - smoke_ok
+        - errors
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            required:
+              - name
+              - bytes
+            properties:
+              name:
+                type: string
+              bytes:
+                type: integer
+            additionalProperties: false
+        errors:
+          type: array
+          items:
+            type: string
+        target:
+          type: string
+        smoke_ok:
+          anyOf:
+            - type: boolean
+            - type: "null"
+      additionalProperties: false
+    state_version: 1
+  - kind: inspect
+    name: inspect_project
+    title: Summarise a Godot project
+    timeout_s: 90
+    description: "Use first on a Godot project the user uploads, or before play-testing, to learn its structure: Godot config version and renderer, main scene, scene trees (node names, types, scripts), each script's methods, signals and exported variables, input actions with their keys, and autoloads. Accepts a project zip (opens it and returns a state_id) or a state_id. Reads the files directly, so it also works on projects that don't compile."
+    input_schema:
+      type: object
+      properties:
+        detail:
+          enum:
+            - summary
+            - full
+          type: string
+          default: summary
+          description: "summary: counts, scripts and actions; full: also every scene's node tree (written to project_map.json either way)."
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: The user's Godot 4 project as a zip (opens it and returns a state_id). Omit when passing a state_id.
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+      additionalProperties: false
+    long_running: false
+    output_schema:
+      type: object
+      required:
+        - project_name
+        - config_version
+        - renderer
+        - main_scene
+        - scenes
+        - scripts
+        - input_actions
+        - autoloads
+        - file_count
+      properties:
+        scenes:
+          type: array
+          items:
+            type: object
+            required:
+              - path
+              - root_type
+              - node_count
+            properties:
+              path:
+                type: string
+              tree:
+                type: array
+                items:
+                  type: string
+              root_type:
+                type: string
+              node_count:
+                type: integer
+            additionalProperties: false
+        scripts:
+          type: array
+          items:
+            type: object
+            required:
+              - path
+              - extends
+              - methods
+              - signals
+              - exports
+            properties:
+              path:
+                type: string
+              exports:
+                type: array
+                items:
+                  type: string
+              extends:
+                anyOf:
+                  - type: string
+                  - type: "null"
+              methods:
+                type: array
+                items:
+                  type: string
+              signals:
+                type: array
+                items:
+                  type: string
+              class_name:
+                type: string
+            additionalProperties: false
+        renderer:
+          type: string
+        autoloads:
+          type: object
+          additionalProperties:
+            type: string
+        file_count:
+          type: integer
+        main_scene:
+          anyOf:
+            - type: string
+            - type: "null"
+        project_name:
+          type: string
+        input_actions:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        config_version:
+          anyOf:
+            - type: integer
+            - type: "null"
+      additionalProperties: false
+    state_version: 1
+  - kind: check
+    name: playtest_game
+    title: Play-test the game with simulated input
+    timeout_s: 660
+    description: "Use to check that gameplay works: runs the game in a virtual display at a fixed 30 fps and plays a scripted sequence in one call, with steps {action:'move_right', hold_ms}, {key:'Space'}, {click:[x,y]}, {wait_ms}, {screenshot:'name'}, {eval:'$Player.position'} to read live state, {assert:'score >= 1', label} and {wait_until:'expr', timeout_ms}. Returns each step's result, assertion pass/fail with values, screenshots and runtime errors. Project files stay unchanged. Call inspect_project first to find action names and node paths."
+    input_schema:
+      type: object
+      required:
+        - steps
+      properties:
+        scene:
+          type: string
+          description: res:// scene to start in instead of the main scene.
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+                description: Press a keyboard key by name (A, Space, Enter, Escape, Left, Up, Shift...) for hold_ms.
+              eval:
+                type: string
+                maxLength: 2000
+                description: GDScript expression to read live state, e.g. $Player.position or score; evaluated on the current scene root.
+              click:
+                type: array
+                items:
+                  type: number
+                maxItems: 2
+                minItems: 2
+                description: Click the mouse at [x, y] window pixels.
+              label:
+                type: string
+                maxLength: 120
+                description: A note shown with this step's result, e.g. 'player moved right'.
+              action:
+                type: string
+                description: Press an input action (e.g. move_right, jump) for hold_ms.
+              assert:
+                type: string
+                maxLength: 2000
+                description: GDScript expression that must be true, e.g. $Player.position.x > 600 or score >= 1.
+              button:
+                enum:
+                  - left
+                  - right
+                  - middle
+                type: string
+                default: left
+                description: Mouse button for click.
+              hold_ms:
+                type: integer
+                default: 100
+                maximum: 30000
+                minimum: 0
+                description: How long action/key/click is held, in game milliseconds.
+              wait_ms:
+                type: integer
+                maximum: 60000
+                minimum: 0
+                description: Let the game run this many game milliseconds with no input.
+              screenshot:
+                type: string
+                maxLength: 40
+                description: Take a screenshot with this name (letters, digits, - and _).
+              timeout_ms:
+                type: integer
+                default: 5000
+                maximum: 60000
+                minimum: 100
+                description: Limit for wait_until, in game milliseconds.
+              wait_until:
+                type: string
+                maxLength: 2000
+                description: Wait until this expression is true (up to timeout_ms), e.g. score >= 1.
+            additionalProperties: false
+          maxItems: 200
+          minItems: 1
+          description: The play-test script, run in order (up to 200 steps).
+        width:
+          type: integer
+          maximum: 1920
+          minimum: 160
+          description: "Window width (default: the project's viewport width)."
+        height:
+          type: integer
+          maximum: 1080
+          minimum: 120
+          description: "Window height (default: the project's viewport height)."
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: A Godot 4 project zip to play-test (omit when passing a state_id).
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+        timeout_s:
+          type: integer
+          default: 120
+          maximum: 600
+          minimum: 10
+          description: Real-time limit for the whole play-test, in seconds.
+      additionalProperties: false
+    long_running: true
+    output_schema:
+      type: object
+      required:
+        - steps_run
+        - steps_total
+        - assertions_passed
+        - assertions_failed
+        - step_errors
+        - results
+        - runtime_errors
+        - crashed
+        - screenshots
+      properties:
+        crashed:
+          type: boolean
+        results:
+          type: array
+          items:
+            type: object
+            required:
+              - index
+              - step
+              - ok
+            properties:
+              ok:
+                type: boolean
+              step:
+                type: string
+              error:
+                type: string
+              index:
+                type: integer
+              label:
+                type: string
+              value: {}
+              passed:
+                type: boolean
+            additionalProperties: false
+        steps_run:
+          type: integer
+        screenshots:
+          type: array
+          items:
+            type: object
+            required:
+              - file
+              - mean_color
+              - mean_rgb
+              - dominant_color
+              - dominant_share
+              - blank
+            properties:
+              t:
+                type: number
+              file:
+                type: string
+              name:
+                type: string
+              blank:
+                type: boolean
+              mean_rgb:
+                type: array
+                items:
+                  type: integer
+              mean_color:
+                type: string
+              dominant_color:
+                type: string
+                description: Most common exact pixel colour, usually the background
+              dominant_share:
+                type: number
+                description: Fraction of the frame that has the dominant colour
+            additionalProperties: false
+        step_errors:
+          type: integer
+        steps_total:
+          type: integer
+        runtime_errors:
+          type: array
+          items:
+            type: object
+            required:
+              - message
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              step:
+                type: integer
+              message:
+                type: string
+              function:
+                type: string
+            additionalProperties: false
+        assertions_failed:
+          type: integer
+        assertions_passed:
+          type: integer
+      additionalProperties: false
+    state_version: 1
+  - kind: analyze
+    name: run_game
+    title: Run the game and capture what it shows
+    timeout_s: 420
+    description: "Use to see the game working (or crashing) with no input: runs the main scene, or a chosen scene, in a virtual display with the OpenGL software renderer at a fixed 30 fps for a set game time. Returns whether it crashed, runtime errors with file and line, screenshots at chosen moments (each with its mean colour, its dominant (background) colour and a blank-frame flag), a contact sheet, the console log and optionally an MP4. seconds=0.2 gives a still render of one scene. Use playtest_game when the game needs input."
+    input_schema:
+      type: object
+      properties:
+        scene:
+          type: string
+          description: res:// path of a scene to run instead of the main scene (e.g. to render one level or a UI screen).
+        width:
+          type: integer
+          maximum: 1920
+          minimum: 160
+          description: "Window width in pixels (default: the project's viewport width)."
+        height:
+          type: integer
+          maximum: 1080
+          minimum: 120
+          description: "Window height in pixels (default: the project's viewport height)."
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: A Godot 4 project zip to run (omit when passing a state_id).
+        seconds:
+          type: number
+          default: 5
+          maximum: 60
+          minimum: 0.2
+          description: Game time to run, 0.2-60 s. Use 0.2 for a still render of a scene.
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+        record_video:
+          type: boolean
+          default: false
+          description: Also record an MP4 of the whole run (30 fps).
+        screenshot_at:
+          type: array
+          items:
+            type: number
+          maxItems: 12
+          description: "Game-time moments (seconds) for screenshots, up to 12. Default: one at the end."
+      additionalProperties: false
+    long_running: true
+    output_schema:
+      type: object
+      required:
+        - scene
+        - started
+        - crashed
+        - finished
+        - exit_code
+        - frames_rendered
+        - runtime_errors
+        - warnings
+        - screenshots
+        - log_tail
+      properties:
+        scene:
+          type: string
+        crashed:
+          type: boolean
+        started:
+          type: boolean
+        finished:
+          type: boolean
+        log_tail:
+          type: string
+        warnings:
+          type: array
+          items:
+            type: string
+        exit_code:
+          anyOf:
+            - type: integer
+            - type: "null"
+        screenshots:
+          type: array
+          items:
+            type: object
+            required:
+              - file
+              - mean_color
+              - mean_rgb
+              - dominant_color
+              - dominant_share
+              - blank
+            properties:
+              t:
+                type: number
+              file:
+                type: string
+              name:
+                type: string
+              blank:
+                type: boolean
+              mean_rgb:
+                type: array
+                items:
+                  type: integer
+              mean_color:
+                type: string
+              dominant_color:
+                type: string
+                description: Most common exact pixel colour, usually the background
+              dominant_share:
+                type: number
+                description: Fraction of the frame that has the dominant colour
+            additionalProperties: false
+        runtime_errors:
+          type: array
+          items:
+            type: object
+            required:
+              - message
+            properties:
+              file:
+                type: string
+              line:
+                type: integer
+              step:
+                type: integer
+              message:
+                type: string
+              function:
+                type: string
+            additionalProperties: false
+        frames_rendered:
+          type: integer
+      additionalProperties: false
+    state_version: 1
+  - kind: edit
+    name: write_game_files
+    title: Write or replace game scripts and scenes
+    timeout_s: 240
+    description: "Use to add game logic or fix code that check_project flagged: writes GDScript (.gd), scenes (.tscn), resources (.tres), shaders or text files at res:// paths, can delete files, and compiles every written .gd with Godot 4.4 right away, returning syntax errors with line numbers. Also opens an uploaded project zip when there is no state_id yet. Returns the updated project zip and state_id; files are written even when they have errors, so fix and call again."
+    input_schema:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            required:
+              - path
+              - content
+            properties:
+              path:
+                type: string
+                description: Project path starting with res://, e.g. res://scripts/enemy.gd or res://scenes/level.tscn.
+              content:
+                type: string
+                maxLength: 1000000
+                description: The full text of the file (GDScript for .gd, Godot text scene format for .tscn).
+            additionalProperties: false
+          maxItems: 50
+          description: "Files to write or replace (up to 50). Text files only: .gd, .tscn, .tres, .gdshader, .cfg, .json, .txt, .md, .csv, project.godot."
+        delete:
+          type: array
+          items:
+            type: string
+          maxItems: 100
+          description: res:// paths of files to delete.
+        project:
+          type: string
+          format: skillnet-file
+          x-accept:
+            - .zip
+          description: An existing Godot 4 project as a zip, to open it when there is no state_id yet (replaces the state's project).
+        state_id:
+          type: string
+          description: "Continue from an earlier call's work: pass the state_id its result gave. Omit to start fresh."
+      additionalProperties: false
+    long_running: false
+    output_schema:
+      type: object
+      required:
+        - written
+        - deleted
+        - script_errors
+        - ok
+        - files
+      properties:
+        ok:
+          type: boolean
+        files:
+          type: array
+          items:
+            type: string
+        deleted:
+          type: array
+          items:
+            type: string
+        written:
+          type: array
+          items:
+            type: string
+        script_errors:
+          type: array
+          items:
+            type: object
+            required:
+              - path
+              - message
+            properties:
+              line:
+                type: integer
+              path:
+                type: string
+              message:
+                type: string
+            additionalProperties: false
+        scene_problems:
+          type: array
+          items:
+            type: string
+      additionalProperties: false
+    state_version: 1
+egress: []
+source:
+  kind: import
+  repo: https://github.com/ray-r-ren/godot-mcp
+  author: ray-r-ren
+  commit: 632530638448ea3e79394fbf74e9a5c92c4b67e5
+  license: MIT
+cant_do:
+  - Open the Godot editor GUI or edit interactively over a live connection between calls
+  - Export to Windows, macOS, Android or iOS (Linux and Web only)
+  - Download add-ons from the Godot Asset Library or fetch art and audio from the web
+  - Make original art or music; starters use simple shapes and colours
+  - Run C#/.NET (Mono) projects or GDExtension native code; GDScript only
+  - Measure real GPU performance; rendering is software-only, so FPS numbers mean nothing
+  - Godot 3.x projects (Godot 4.4 only)
+  - Start and shape a game project
+  - Check a project
+engines: []
+workers: []
+category: creative-media
+datasets: []
+resources:
+  cpu: 4
+  gpu: null
+  timeout_s: 900
+  memory_mib: 6144
+  max_input_mb: 200
+agent_side: []
+superpower: Describe a game. Get a playable Godot project, built, run and play-tested.
+credentials: []
+sdk_version: 0.3.0
+tools_package: tools
+example_prompts:
+  - Make me a top-down game where a blue square collects coins with the arrow keys and a score shows in the corner
+  - Here's my Godot project zip. Why does it crash on start? Fix it and show me a screenshot
+  - "Play-test my platformer: hold right for 2 seconds, jump, and tell me if the player reaches the flag"
+  - Export my game so I can play it in a browser
+  - Add a pause menu to my game and check that Escape opens it
+manifest_version: 1

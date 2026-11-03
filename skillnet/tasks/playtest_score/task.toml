@@ -1,0 +1,46 @@
+schema_version = "1.4"
+source = "skillnet"
+artifacts = ["/task/outputs", "/task/answer.txt"]
+
+[task]
+name = "skillnet/instant-game-studio-playtest_score"
+description = "Instant Game Studio — Play-test with simulated input: Here's my Godot 4 game \"Gem Garden\" as a zip. I'm going to start it, hold the Right arrow key for 2 seconds, let go, then hold the Down arrow key for 1 second. "
+keywords = ["skillnet", "instant-game-studio", "play-test-with-simulated-input"]
+
+[[task.authors]]
+name = "SkillNet Agent"
+
+[metadata]
+[metadata.skillnet]
+skill = "instant-game-studio"
+version = 1
+task = "playtest_score"
+ability = "Play-test with simulated input"
+core = true
+source = "builder"
+judge = "programmatic"
+prompt = "Here's my Godot 4 game \"Gem Garden\" as a zip. I'm going to start it, hold the Right arrow key for 2 seconds, let go, then hold the Down arrow key for 1 second. What will my score be at the end of that?\n\nPlease actually play it through that way to find out, rather than guessing from the code. End your answer with a line in the form `Score: N`."
+
+[agent]
+timeout_sec = 900
+user = "agent"
+
+[verifier]
+timeout_sec = 600
+environment_mode = "separate"
+
+[environment]
+build_timeout_sec = 1800
+cpus = 4
+memory_mb = 6144
+workdir = "/task"
+network_mode = "allowlist"
+allowed_hosts = ["skillnet.sh"]
+
+[[environment.mcp_servers]]
+name = "skillnet"
+transport = "streamable-http"
+url = "https://skillnet.sh/mcp"
+
+[environment.mcp_servers.headers]
+Authorization = "Bearer ${SKILLNET_API_KEY}"
